@@ -33,8 +33,7 @@ func NewTwitch(clientID, clientSecret string) Client {
 }
 
 func (t *Twitch) StartTracking(ctx context.Context, logins []string, checkRate time.Duration) error {
-	err := t.updateLiveCache(ctx, logins)
-	if err != nil {
+	if err := t.updateLiveCache(ctx, logins); err != nil {
 		return err
 	}
 
@@ -44,6 +43,7 @@ func (t *Twitch) StartTracking(ctx context.Context, logins []string, checkRate t
 		for {
 			select {
 			case <-ctx.Done():
+				t.onStreamChange.UnbindAll()
 				return
 			case <-ticker.C:
 				_ = t.updateLiveCache(ctx, logins)
@@ -54,85 +54,11 @@ func (t *Twitch) StartTracking(ctx context.Context, logins []string, checkRate t
 	return nil
 }
 
-func (t *Twitch) IsLive(ctx context.Context, login string) (bool, error) {
-	t.mu.RLock()
-	v, ok := t.liveCache[login]
-	t.mu.RUnlock()
-	if ok {
-		return v, nil
-	}
-
-	live, err := t.getIsStreamLive(ctx, login)
-	if err != nil {
-		return false, err
-	}
-
-	t.mu.Lock()
-	t.liveCache[login] = live
-	t.mu.Unlock()
-
-	return live, nil
-}
-
 func (t *Twitch) OnStreamChange(f func(e *StreamChangeEvent) error) {
 	t.onStreamChange.BindFunc(f)
 }
 
-func (t *Twitch) request(ctx context.Context, method, rawURL string, body any) (*http.Response, error) {
-	t.limiter.wait()
-
-	token, err := t.token.GetToken(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	var reqBodyReader *strings.Reader
-	if body != nil {
-		b, _ := json.Marshal(body)
-		reqBodyReader = strings.NewReader(string(b))
-	} else {
-		reqBodyReader = strings.NewReader("")
-	}
-
-	req, err := http.NewRequestWithContext(ctx, method, rawURL, reqBodyReader)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Client-Id", t.token.clientID)
-	req.Header.Set("Authorization", "Bearer "+token)
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-
-	return t.httpClient.Do(req)
-}
-
-func (t *Twitch) updateLiveCache(ctx context.Context, logins []string) error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	for _, login := range logins {
-		live, err := t.getIsStreamLive(ctx, login)
-		if err != nil {
-			return err
-		}
-
-		if l, ok := t.liveCache[login]; ok && l == live {
-			continue
-		}
-
-		t.liveCache[login] = live
-		err = t.onStreamChange.Trigger(&StreamChangeEvent{
-			Channel: login,
-			Live:    live,
-		})
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (t *Twitch) getIsStreamLive(ctx context.Context, login string) (bool, error) {
+func (t *Twitch) IsLive(ctx context.Context, login string) (bool, error) {
 	base, _ := url.Parse("https://api.twitch.tv/helix/streams")
 	q := base.Query()
 	q.Set("user_login", login)
@@ -155,4 +81,57 @@ func (t *Twitch) getIsStreamLive(ctx context.Context, login string) (bool, error
 	}
 
 	return len(data.Data) > 0, nil
+}
+
+func (t *Twitch) request(ctx context.Context, method, url string, body any) (*http.Response, error) {
+	t.limiter.wait()
+
+	token, err := t.token.GetToken(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	var reqBodyReader *strings.Reader
+	if body != nil {
+		b, _ := json.Marshal(body)
+		reqBodyReader = strings.NewReader(string(b))
+	} else {
+		reqBodyReader = strings.NewReader("")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, url, reqBodyReader)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Client-Id", t.token.clientID)
+	req.Header.Set("Authorization", "Bearer "+token)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	return t.httpClient.Do(req)
+}
+
+func (t *Twitch) updateLiveCache(ctx context.Context, logins []string) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, login := range logins {
+		live, err := t.IsLive(ctx, login)
+		if err != nil {
+			return err
+		}
+
+		if l, ok := t.liveCache[login]; ok && l == live {
+			continue
+		}
+
+		t.liveCache[login] = live
+		if err = t.onStreamChange.Trigger(&StreamChangeEvent{
+			Channel: login,
+			Live:    live,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }

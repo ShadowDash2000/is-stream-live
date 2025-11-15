@@ -37,6 +37,10 @@ func (h *Hook[T]) Unbind(idsToRemove ...string) {
 	}
 }
 
+func (h *Hook[T]) UnbindAll() {
+	h.handlers = nil
+}
+
 func (h *Hook[T]) Trigger(event T) error {
 	event.setNextFunc(nil) // reset in case the event is being reused
 

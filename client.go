@@ -1,7 +1,13 @@
 package streamlive
 
+import (
+	"context"
+	"time"
+)
+
 type Client interface {
-	IsLive(channel string) (bool, error)
+	StartTracking(ctx context.Context, logins []string, checkRate time.Duration) error
+	IsLive(ctx context.Context, login string) (bool, error)
 	OnStreamChange(func(e *StreamChangeEvent) error)
 }
 

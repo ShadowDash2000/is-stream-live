@@ -9,8 +9,6 @@ import (
 	"time"
 )
 
-const twitchTokenURL = "https://id.twitch.tv/oauth2/token"
-
 type twitchToken struct {
 	clientID     string
 	clientSecret string
@@ -42,7 +40,7 @@ func (t *twitchToken) GetToken(ctx context.Context) (string, error) {
 }
 
 func (t *twitchToken) LoginTwitch(ctx context.Context) (string, time.Duration, error) {
-	baseURL, _ := url.Parse(twitchTokenURL)
+	baseURL, _ := url.Parse("https://id.twitch.tv/oauth2/token")
 	params := url.Values{}
 	params.Add("client_id", t.clientID)
 	params.Add("client_secret", t.clientSecret)

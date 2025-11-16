@@ -40,8 +40,9 @@ func Test_StartTracking(t *testing.T) {
 	login := envOrSkip(t, "TWITCH_USER_LOGIN")
 
 	c := NewTwitch(clientID, clientSecret)
-	err := c.StartTracking(context.Background(), []string{login}, time.Minute)
-	if err != nil {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := c.StartTracking(ctx, []string{login}, time.Minute); err != nil {
 		t.Fatalf("Test_StartTracking: StartTracking failed: %v", err)
 	}
 }

@@ -15,7 +15,9 @@ type Twitch struct {
 	token      *twitchToken
 	limiter    *rateLimiter
 	httpClient *http.Client
+	started    bool
 	liveCache  map[string]bool
+	logins     map[string]struct{}
 	mu         sync.RWMutex
 
 	onStreamChange *Hook[*StreamChangeEvent]
@@ -33,25 +35,48 @@ func NewTwitch(clientID, clientSecret string) Client {
 }
 
 func (t *Twitch) StartTracking(ctx context.Context, logins []string, checkRate time.Duration) error {
-	if err := t.updateLiveCache(ctx, logins); err != nil {
+	if t.started {
+		panic("Twitch client already started")
+	}
+
+	t.logins = make(map[string]struct{}, len(logins))
+	for _, login := range logins {
+		t.logins[login] = struct{}{}
+	}
+
+	if err := t.updateLiveCache(ctx); err != nil {
 		return err
 	}
 
+	t.started = true
 	go func() {
 		ticker := time.NewTicker(checkRate)
 
 		for {
 			select {
 			case <-ctx.Done():
+				t.started = false
 				t.onStreamChange.UnbindAll()
 				return
 			case <-ticker.C:
-				_ = t.updateLiveCache(ctx, logins)
+				_ = t.updateLiveCache(ctx)
 			}
 		}
 	}()
 
 	return nil
+}
+
+func (t *Twitch) AddLogin(login string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.logins[login] = struct{}{}
+}
+
+func (t *Twitch) RemoveLogin(login string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.logins, login)
 }
 
 func (t *Twitch) OnStreamChange(f func(e *StreamChangeEvent) error) {
@@ -112,10 +137,10 @@ func (t *Twitch) request(ctx context.Context, method, url string, body any) (*ht
 	return t.httpClient.Do(req)
 }
 
-func (t *Twitch) updateLiveCache(ctx context.Context, logins []string) error {
+func (t *Twitch) updateLiveCache(ctx context.Context) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	for _, login := range logins {
+	for login := range t.logins {
 		live, err := t.IsLive(ctx, login)
 		if err != nil {
 			return err

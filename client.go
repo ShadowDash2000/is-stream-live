@@ -8,6 +8,8 @@ import (
 
 type Client interface {
 	StartTracking(ctx context.Context, logins []string, checkRate time.Duration) error
+	AddLogin(login string)
+	RemoveLogin(login string)
 	IsLive(ctx context.Context, login string) (bool, error)
 	OnStreamChange(func(e *StreamChangeEvent) error)
 }
@@ -20,7 +22,9 @@ type StreamChangeEvent struct {
 
 type StreamLive struct {
 	clients   []Client
+	started   bool
 	liveCache map[string]bool
+	logins    map[string]struct{}
 	mu        sync.RWMutex
 
 	onStreamChange *Hook[*StreamChangeEvent]
@@ -38,25 +42,48 @@ func New(clients ...Client) *StreamLive {
 // StartTracking will start a goroutine that will check for stream changes every checkRate.
 // To subscribe to stream changes, use OnStreamChange.
 func (s *StreamLive) StartTracking(ctx context.Context, logins []string, checkRate time.Duration) error {
-	if err := s.updateLiveCache(ctx, logins); err != nil {
+	if s.started {
+		panic("Stream tracker already started")
+	}
+
+	s.logins = make(map[string]struct{}, len(logins))
+	for _, login := range logins {
+		s.logins[login] = struct{}{}
+	}
+
+	if err := s.updateLiveCache(ctx); err != nil {
 		return err
 	}
 
+	s.started = true
 	go func() {
 		ticker := time.NewTicker(checkRate)
 
 		for {
 			select {
 			case <-ctx.Done():
+				s.started = false
 				s.onStreamChange.UnbindAll()
 				return
 			case <-ticker.C:
-				_ = s.updateLiveCache(ctx, logins)
+				_ = s.updateLiveCache(ctx)
 			}
 		}
 	}()
 
 	return nil
+}
+
+func (s *StreamLive) AddLogin(login string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.logins[login] = struct{}{}
+}
+
+func (s *StreamLive) RemoveLogin(login string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.logins, login)
 }
 
 // OnStreamChange
@@ -65,10 +92,10 @@ func (s *StreamLive) OnStreamChange(f func(e *StreamChangeEvent) error) {
 	s.onStreamChange.BindFunc(f)
 }
 
-func (s *StreamLive) updateLiveCache(ctx context.Context, logins []string) error {
-	clientsCache := make(map[string]map[int]bool, len(logins))
+func (s *StreamLive) updateLiveCache(ctx context.Context) error {
+	clientsCache := make(map[string]map[int]bool, len(s.logins))
 	for clientIndex, client := range s.clients {
-		for _, login := range logins {
+		for login := range s.logins {
 			live, err := client.IsLive(ctx, login)
 			if err != nil {
 				return err

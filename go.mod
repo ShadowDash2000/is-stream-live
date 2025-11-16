@@ -1,4 +1,4 @@
-module is-stream-live
+module github.com/ShadowDash2000/is-stream-live
 
 go 1.25
 

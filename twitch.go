@@ -88,6 +88,7 @@ func (t *Twitch) RemoveLogin(login string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	delete(t.logins, login)
+	delete(t.liveCache, login)
 }
 
 func (t *Twitch) OnStreamChange(f func(e *StreamChangeEvent) error) {

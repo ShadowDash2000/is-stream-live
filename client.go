@@ -95,6 +95,7 @@ func (s *StreamLive) RemoveLogin(login string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.logins, login)
+	delete(s.liveCache, login)
 }
 
 // OnStreamChange

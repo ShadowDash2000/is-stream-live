@@ -48,6 +48,9 @@ func (s *StreamLive) StartTracking(ctx context.Context, logins []string, checkRa
 
 	s.logins = make(map[string]struct{}, len(logins))
 	for _, login := range logins {
+		if login == "" {
+			continue
+		}
 		s.logins[login] = struct{}{}
 	}
 
@@ -75,12 +78,20 @@ func (s *StreamLive) StartTracking(ctx context.Context, logins []string, checkRa
 }
 
 func (s *StreamLive) AddLogin(login string) {
+	if login == "" {
+		return
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.logins[login] = struct{}{}
 }
 
 func (s *StreamLive) RemoveLogin(login string) {
+	if login == "" {
+		return
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.logins, login)

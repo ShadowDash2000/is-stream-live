@@ -41,6 +41,9 @@ func (t *Twitch) StartTracking(ctx context.Context, logins []string, checkRate t
 
 	t.logins = make(map[string]struct{}, len(logins))
 	for _, login := range logins {
+		if login == "" {
+			continue
+		}
 		t.logins[login] = struct{}{}
 	}
 
@@ -68,12 +71,20 @@ func (t *Twitch) StartTracking(ctx context.Context, logins []string, checkRate t
 }
 
 func (t *Twitch) AddLogin(login string) {
+	if login == "" {
+		return
+	}
+
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.logins[login] = struct{}{}
 }
 
 func (t *Twitch) RemoveLogin(login string) {
+	if login == "" {
+		return
+	}
+
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	delete(t.logins, login)

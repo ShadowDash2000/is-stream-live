@@ -7,17 +7,23 @@ import (
 )
 
 type Client interface {
-	StartTracking(ctx context.Context, logins []string, checkRate time.Duration) error
+	StartTracking(ctx context.Context, logins []string, checkRate time.Duration)
 	AddLogin(login string)
 	RemoveLogin(login string)
 	IsLive(ctx context.Context, login string) (bool, error)
 	OnStreamChange(func(e *StreamChangeEvent) error)
+	OnRequestError(func(e *RequestErrorEvent) error)
 }
 
 type StreamChangeEvent struct {
 	Event
 	Channel string
 	Live    bool
+}
+
+type RequestErrorEvent struct {
+	Event
+	Error error
 }
 
 type StreamLive struct {
@@ -28,6 +34,7 @@ type StreamLive struct {
 	mu        sync.RWMutex
 
 	onStreamChange *Hook[*StreamChangeEvent]
+	onRequestError *Hook[*RequestErrorEvent]
 }
 
 func New(clients ...Client) *StreamLive {
@@ -36,12 +43,13 @@ func New(clients ...Client) *StreamLive {
 		liveCache: make(map[string]bool),
 
 		onStreamChange: &Hook[*StreamChangeEvent]{},
+		onRequestError: &Hook[*RequestErrorEvent]{},
 	}
 }
 
 // StartTracking will start a goroutine that will check for stream changes every checkRate.
 // To subscribe to stream changes, use OnStreamChange.
-func (s *StreamLive) StartTracking(ctx context.Context, logins []string, checkRate time.Duration) error {
+func (s *StreamLive) StartTracking(ctx context.Context, logins []string, checkRate time.Duration) {
 	if s.started {
 		panic("Stream tracker already started")
 	}
@@ -54,13 +62,13 @@ func (s *StreamLive) StartTracking(ctx context.Context, logins []string, checkRa
 		s.logins[login] = struct{}{}
 	}
 
-	if err := s.updateLiveCache(ctx); err != nil {
-		return err
-	}
-
 	s.started = true
 	go func() {
 		ticker := time.NewTicker(checkRate)
+
+		if err := s.updateLiveCache(ctx); err != nil {
+			_ = s.onRequestError.Trigger(&RequestErrorEvent{Error: err})
+		}
 
 		for {
 			select {
@@ -69,12 +77,12 @@ func (s *StreamLive) StartTracking(ctx context.Context, logins []string, checkRa
 				s.onStreamChange.UnbindAll()
 				return
 			case <-ticker.C:
-				_ = s.updateLiveCache(ctx)
+				if err := s.updateLiveCache(ctx); err != nil {
+					_ = s.onRequestError.Trigger(&RequestErrorEvent{Error: err})
+				}
 			}
 		}
 	}()
-
-	return nil
 }
 
 func (s *StreamLive) AddLogin(login string) {
@@ -102,6 +110,10 @@ func (s *StreamLive) RemoveLogin(login string) {
 // Note: event will be triggered if at least one client reports that channel is live.
 func (s *StreamLive) OnStreamChange(f func(e *StreamChangeEvent) error) {
 	s.onStreamChange.BindFunc(f)
+}
+
+func (s *StreamLive) OnRequestError(f func(e *RequestErrorEvent) error) {
+	s.onRequestError.BindFunc(f)
 }
 
 func (s *StreamLive) updateLiveCache(ctx context.Context) error {

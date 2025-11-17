@@ -42,7 +42,5 @@ func Test_StartTracking(t *testing.T) {
 	c := NewTwitch(clientID, clientSecret)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if err := c.StartTracking(ctx, []string{login}, time.Minute); err != nil {
-		t.Fatalf("Test_StartTracking: StartTracking failed: %v", err)
-	}
+	c.StartTracking(ctx, []string{login}, time.Minute)
 }

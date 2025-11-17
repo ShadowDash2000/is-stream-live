@@ -21,6 +21,7 @@ type Twitch struct {
 	mu         sync.RWMutex
 
 	onStreamChange *Hook[*StreamChangeEvent]
+	onRequestError *Hook[*RequestErrorEvent]
 }
 
 func NewTwitch(clientID, clientSecret string) Client {
@@ -31,10 +32,11 @@ func NewTwitch(clientID, clientSecret string) Client {
 		liveCache:  make(map[string]bool),
 
 		onStreamChange: &Hook[*StreamChangeEvent]{},
+		onRequestError: &Hook[*RequestErrorEvent]{},
 	}
 }
 
-func (t *Twitch) StartTracking(ctx context.Context, logins []string, checkRate time.Duration) error {
+func (t *Twitch) StartTracking(ctx context.Context, logins []string, checkRate time.Duration) {
 	if t.started {
 		panic("Twitch client already started")
 	}
@@ -47,13 +49,13 @@ func (t *Twitch) StartTracking(ctx context.Context, logins []string, checkRate t
 		t.logins[login] = struct{}{}
 	}
 
-	if err := t.updateLiveCache(ctx); err != nil {
-		return err
-	}
-
 	t.started = true
 	go func() {
 		ticker := time.NewTicker(checkRate)
+
+		if err := t.updateLiveCache(ctx); err != nil {
+			_ = t.onRequestError.Trigger(&RequestErrorEvent{Error: err})
+		}
 
 		for {
 			select {
@@ -62,12 +64,12 @@ func (t *Twitch) StartTracking(ctx context.Context, logins []string, checkRate t
 				t.onStreamChange.UnbindAll()
 				return
 			case <-ticker.C:
-				_ = t.updateLiveCache(ctx)
+				if err := t.updateLiveCache(ctx); err != nil {
+					_ = t.onRequestError.Trigger(&RequestErrorEvent{Error: err})
+				}
 			}
 		}
 	}()
-
-	return nil
 }
 
 func (t *Twitch) AddLogin(login string) {
@@ -93,6 +95,10 @@ func (t *Twitch) RemoveLogin(login string) {
 
 func (t *Twitch) OnStreamChange(f func(e *StreamChangeEvent) error) {
 	t.onStreamChange.BindFunc(f)
+}
+
+func (t *Twitch) OnRequestError(f func(e *RequestErrorEvent) error) {
+	t.onRequestError.BindFunc(f)
 }
 
 func (t *Twitch) IsLive(ctx context.Context, login string) (bool, error) {

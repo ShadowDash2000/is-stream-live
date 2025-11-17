@@ -22,7 +22,5 @@ func Test_ClientStartTracking(t *testing.T) {
 	)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if err := c.StartTracking(ctx, []string{login}, time.Minute); err != nil {
-		t.Fatalf("Test_ClientStartTracking: StartTracking failed: %v", err)
-	}
+	c.StartTracking(ctx, []string{login}, time.Minute)
 }

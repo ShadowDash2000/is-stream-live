@@ -28,7 +28,8 @@ type RequestErrorEvent struct {
 
 type StreamLive struct {
 	clients   []Client
-	started   bool
+	ctx       context.Context
+	cancel    context.CancelFunc
 	liveCache map[string]bool
 	logins    map[string]struct{}
 	mu        sync.RWMutex
@@ -50,7 +51,7 @@ func New(clients ...Client) *StreamLive {
 // StartTracking will start a goroutine that will check for stream changes every checkRate.
 // To subscribe to stream changes, use OnStreamChange.
 func (s *StreamLive) StartTracking(ctx context.Context, logins []string, checkRate time.Duration) {
-	if s.started {
+	if s.ctx != nil {
 		panic("Stream tracker already started")
 	}
 
@@ -62,7 +63,7 @@ func (s *StreamLive) StartTracking(ctx context.Context, logins []string, checkRa
 		s.logins[login] = struct{}{}
 	}
 
-	s.started = true
+	s.ctx, s.cancel = context.WithCancel(ctx)
 	go func() {
 		ticker := time.NewTicker(checkRate)
 
@@ -73,8 +74,10 @@ func (s *StreamLive) StartTracking(ctx context.Context, logins []string, checkRa
 		for {
 			select {
 			case <-ctx.Done():
-				s.started = false
+				s.ctx = nil
+				s.cancel = nil
 				s.onStreamChange.UnbindAll()
+				s.onRequestError.UnbindAll()
 				return
 			case <-ticker.C:
 				if err := s.updateLiveCache(ctx); err != nil {
@@ -83,6 +86,13 @@ func (s *StreamLive) StartTracking(ctx context.Context, logins []string, checkRa
 			}
 		}
 	}()
+}
+
+func (s *StreamLive) StopTracking() {
+	if s.ctx == nil {
+		return
+	}
+	s.cancel()
 }
 
 func (s *StreamLive) AddLogin(login string) {

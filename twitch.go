@@ -15,7 +15,8 @@ type Twitch struct {
 	token      *twitchToken
 	limiter    *rateLimiter
 	httpClient *http.Client
-	started    bool
+	ctx        context.Context
+	cancel     context.CancelFunc
 	liveCache  map[string]bool
 	logins     map[string]struct{}
 	mu         sync.RWMutex
@@ -37,7 +38,7 @@ func NewTwitch(clientID, clientSecret string) Client {
 }
 
 func (t *Twitch) StartTracking(ctx context.Context, logins []string, checkRate time.Duration) {
-	if t.started {
+	if t.ctx != nil {
 		panic("Twitch client already started")
 	}
 
@@ -49,7 +50,7 @@ func (t *Twitch) StartTracking(ctx context.Context, logins []string, checkRate t
 		t.logins[login] = struct{}{}
 	}
 
-	t.started = true
+	t.ctx, t.cancel = context.WithCancel(ctx)
 	go func() {
 		ticker := time.NewTicker(checkRate)
 
@@ -60,8 +61,10 @@ func (t *Twitch) StartTracking(ctx context.Context, logins []string, checkRate t
 		for {
 			select {
 			case <-ctx.Done():
-				t.started = false
+				t.ctx = nil
+				t.cancel = nil
 				t.onStreamChange.UnbindAll()
+				t.onRequestError.UnbindAll()
 				return
 			case <-ticker.C:
 				if err := t.updateLiveCache(ctx); err != nil {
@@ -70,6 +73,13 @@ func (t *Twitch) StartTracking(ctx context.Context, logins []string, checkRate t
 			}
 		}
 	}()
+}
+
+func (t *Twitch) StopTracking() {
+	if t.ctx == nil {
+		return
+	}
+	t.cancel()
 }
 
 func (t *Twitch) AddLogin(login string) {
